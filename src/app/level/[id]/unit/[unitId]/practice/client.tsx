@@ -3,15 +3,111 @@
 import React, { useState, useCallback } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
-import {
-  getPracticeSetById,
-  type GeneratedExercise,
-  type GeneratedPracticeSet,
-  type GeneratedMultipleChoice,
-  type GeneratedFillBlank,
-  type GeneratedTrueFalse,
-  type GeneratedWordOrder,
-} from "@/lib/openai";
+import { getUnit } from "@/data/units";
+
+/* ================================================================
+   Exercise Types & Data
+   ================================================================ */
+
+type ExerciseType =
+  | "multiple-choice"
+  | "fill-blank"
+  | "true-false"
+  | "word-order";
+
+interface BaseExercise {
+  type: ExerciseType;
+  question: string;
+  explanation: string;
+  accentColor: string;
+}
+
+interface MultipleChoiceExercise extends BaseExercise {
+  type: "multiple-choice";
+  options: string[];
+  correct: string;
+}
+
+interface FillBlankExercise extends BaseExercise {
+  type: "fill-blank";
+  answer: string;
+  hint: string;
+  sentenceBefore: string;
+  sentenceAfter: string;
+}
+
+interface TrueFalseExercise extends BaseExercise {
+  type: "true-false";
+  sentence: string;
+  correct: boolean;
+  correctedSentence: string;
+}
+
+interface WordOrderExercise extends BaseExercise {
+  type: "word-order";
+  shuffledWords: string[];
+  correctOrder: string[];
+}
+
+type Exercise =
+  | MultipleChoiceExercise
+  | FillBlankExercise
+  | TrueFalseExercise
+  | WordOrderExercise;
+
+const exercises: Exercise[] = [
+  {
+    type: "multiple-choice",
+    question: "He ___ a student.",
+    options: ["am", "is", "are", "be"],
+    correct: "is",
+    explanation: "他是一个学生。He 后面用 is。",
+    accentColor: "#FF6B6B",
+  },
+  {
+    type: "fill-blank",
+    question: "___ name's Lucy.",
+    answer: "My",
+    hint: "M___",
+    sentenceBefore: "",
+    sentenceAfter: " name's Lucy.",
+    explanation: "My name's Lucy. 我的名字是露西。",
+    accentColor: "#45B7D1",
+  },
+  {
+    type: "true-false",
+    question: "判断下面这句话对不对：",
+    sentence: "He can flies.",
+    correct: false,
+    correctedSentence: "He can fly.",
+    explanation: "can 后面用动词原形，不加 s！",
+    accentColor: "#FF8E53",
+  },
+  {
+    type: "multiple-choice",
+    question: "___ am a girl.",
+    options: ["He", "She", "I", "You"],
+    correct: "I",
+    explanation: "I am a girl. 我是一个女孩。am 前面用 I。",
+    accentColor: "#7C5CFC",
+  },
+  {
+    type: "word-order",
+    question: "把单词排成正确的句子：",
+    shuffledWords: ["is", "a", "This", "cat", "."],
+    correctOrder: ["This", "is", "a", "cat", "."],
+    explanation: "This is a cat. 这是一只猫。",
+    accentColor: "#51CF66",
+  },
+  {
+    type: "multiple-choice",
+    question: "There ___ two cats.",
+    options: ["is", "are", "am", "be"],
+    correct: "are",
+    explanation: "两只猫是复数，用 are。There are two cats.",
+    accentColor: "#FFB347",
+  },
+];
 
 /* ================================================================
    Animation Variants
@@ -23,7 +119,11 @@ const slideVariants = {
     opacity: 0,
     scale: 0.95,
   }),
-  center: { x: 0, opacity: 1, scale: 1 },
+  center: {
+    x: 0,
+    opacity: 1,
+    scale: 1,
+  },
   exit: (direction: number) => ({
     x: direction < 0 ? 300 : -300,
     opacity: 0,
@@ -62,50 +162,14 @@ const confettiEmojis = ["🎉", "⭐", "✨", "🌟", "💫", "🎊"];
    Main Practice Page
    ================================================================ */
 
-export default function GeneratedPracticePage({
-  params,
+export default function PracticePageClient({
+  id,
+  unitId,
 }: {
-  params: Promise<{ id: string }>;
+  id: string;
+  unitId: string;
 }) {
-  const { id } = React.use(params);
-  const [practiceSet] = useState<GeneratedPracticeSet | null>(
-    () => getPracticeSetById(id) ?? null
-  );
-
-  if (!practiceSet) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FFFDF7]">
-        <div className="text-center">
-          <div className="text-6xl">😢</div>
-          <p className="mt-4 text-xl font-bold text-gray-700">
-            找不到这套练习
-          </p>
-          <Link
-            href="/upload"
-            className="mt-4 inline-block rounded-full bg-gray-200 px-6 py-2 font-semibold text-gray-600 transition hover:bg-gray-300"
-          >
-            ← 返回上传页
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  return <PracticeRunner practiceSet={practiceSet} />;
-}
-
-/* ================================================================
-   Practice Runner (manages state + renders exercises)
-   ================================================================ */
-
-function PracticeRunner({
-  practiceSet,
-}: {
-  practiceSet: GeneratedPracticeSet;
-}) {
-  const exercises = practiceSet.exercises;
-  const totalExercises = exercises.length;
-  const accentColor = "#FF6B6B";
+  const unit = getUnit(Number(id), Number(unitId));
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(1);
@@ -116,9 +180,7 @@ function PracticeRunner({
   const [trueFalseAnswer, setTrueFalseAnswer] = useState<boolean | null>(null);
   const [wordOrderSelected, setWordOrderSelected] = useState<string[]>([]);
   const [wordOrderRemaining, setWordOrderRemaining] = useState<string[]>(
-    () => exercises[0].type === "word-order"
-      ? [...(exercises[0] as GeneratedWordOrder).shuffledWords]
-      : []
+    () => exercises[0].type === "word-order" ? [...exercises[0].shuffledWords] : []
   );
 
   // Feedback state
@@ -129,18 +191,14 @@ function PracticeRunner({
   // Progress state
   const [score, setScore] = useState(0);
   const [completed, setCompleted] = useState<boolean[]>(
-    () => new Array(totalExercises).fill(false)
+    () => new Array(exercises.length).fill(false)
   );
   const [showResults, setShowResults] = useState(false);
   const [showHint, setShowHint] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
 
-  const hasOriginal = !!(practiceSet.originalText || practiceSet.originalImage);
-
+  const totalExercises = exercises.length;
   const currentExercise = exercises[currentIndex];
-  const exerciseColor =
-    (currentExercise as GeneratedExercise & { accentColor?: string })
-      .accentColor || accentColor;
+  const unitColor = unit?.color ?? "#FF6B6B";
 
   /* ---------- Helpers ---------- */
 
@@ -155,7 +213,7 @@ function PracticeRunner({
       case "word-order":
         return (
           wordOrderSelected.length ===
-          (currentExercise as GeneratedWordOrder).correctOrder.length
+          (currentExercise as WordOrderExercise).correctOrder.length
         );
       default:
         return false;
@@ -171,24 +229,18 @@ function PracticeRunner({
   const checkAnswer = useCallback((): boolean => {
     switch (currentExercise.type) {
       case "multiple-choice":
-        return (
-          selectedAnswer === (currentExercise as GeneratedMultipleChoice).correct
-        );
+        return selectedAnswer === currentExercise.correct;
       case "fill-blank":
         return (
           fillBlankInput.trim().toLowerCase() ===
-          (currentExercise as GeneratedFillBlank).answer.toLowerCase()
+          currentExercise.answer.toLowerCase()
         );
       case "true-false":
-        return (
-          trueFalseAnswer === (currentExercise as GeneratedTrueFalse).correct
-        );
+        return trueFalseAnswer === currentExercise.correct;
       case "word-order":
         return (
           JSON.stringify(wordOrderSelected) ===
-          JSON.stringify(
-            (currentExercise as GeneratedWordOrder).correctOrder
-          )
+          JSON.stringify(currentExercise.correctOrder)
         );
       default:
         return false;
@@ -207,7 +259,9 @@ function PracticeRunner({
     setIsCorrect(correct);
     setShowResult(true);
     setShowExplanation(true);
-    if (correct) setScore((prev) => prev + 1);
+    if (correct) {
+      setScore((prev) => prev + 1);
+    }
     setCompleted((prev) => {
       const next = [...prev];
       next[currentIndex] = true;
@@ -223,7 +277,7 @@ function PracticeRunner({
       // Initialize word order for next exercise
       const nextExercise = exercises[nextIndex];
       if (nextExercise.type === "word-order") {
-        setWordOrderRemaining([...(nextExercise as GeneratedWordOrder).shuffledWords]);
+        setWordOrderRemaining([...nextExercise.shuffledWords]);
         setWordOrderSelected([]);
       }
       setCurrentIndex(nextIndex);
@@ -248,12 +302,12 @@ function PracticeRunner({
     setCurrentIndex(0);
     setDirection(-1);
     setScore(0);
-    setCompleted(new Array(totalExercises).fill(false));
+    setCompleted(new Array(exercises.length).fill(false));
     setShowResults(false);
     resetAnswerState();
     // Initialize word order for first exercise
     if (exercises[0].type === "word-order") {
-      setWordOrderRemaining([...(exercises[0] as GeneratedWordOrder).shuffledWords]);
+      setWordOrderRemaining([...exercises[0].shuffledWords]);
       setWordOrderSelected([]);
     }
   };
@@ -280,30 +334,42 @@ function PracticeRunner({
     });
   };
 
+  /* ---------- Not Found ---------- */
+
+  if (!unit) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FFFDF7]">
+        <div className="text-center">
+          <div className="text-6xl">😢</div>
+          <p className="mt-4 text-xl font-bold text-gray-700">
+            找不到这个单元
+          </p>
+          <Link
+            href={`/level/${id}`}
+            className="mt-4 inline-block rounded-full bg-gray-200 px-6 py-2 font-semibold text-gray-600 transition hover:bg-gray-300"
+          >
+            ← 返回
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   /* ---------- Results Screen ---------- */
 
   if (showResults) {
-    const stars =
-      score === totalExercises ? 3 : score >= totalExercises * 0.7 ? 2 : score >= totalExercises * 0.4 ? 1 : 0;
+    const stars = score === totalExercises ? 3 : score >= 4 ? 2 : score >= 2 ? 1 : 0;
     const messages = [
-      { min: totalExercises, text: "太厉害了！满分！", emoji: "🏆" },
-      {
-        min: Math.ceil(totalExercises * 0.7),
-        text: "非常棒！继续加油！",
-        emoji: "🎉",
-      },
-      {
-        min: Math.ceil(totalExercises * 0.4),
-        text: "不错哦，再练习一下！",
-        emoji: "💪",
-      },
+      { min: 6, text: "太厉害了！满分！", emoji: "🏆" },
+      { min: 4, text: "非常棒！继续加油！", emoji: "🎉" },
+      { min: 2, text: "不错哦，再练习一下！", emoji: "💪" },
       { min: 0, text: "加油，多练习就会进步！", emoji: "📚" },
     ];
     const message = messages.find((m) => score >= m.min)!;
 
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#FFFDF7] to-[#FFF3E0] px-6">
-        {/* Floating confetti */}
+        {/* Floating decorative elements */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           {confettiEmojis.map((emoji, i) => (
             <motion.div
@@ -363,15 +429,6 @@ function PracticeRunner({
           </motion.h2>
 
           <motion.p
-            className="mt-1 text-sm font-medium text-gray-400"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.45 }}
-          >
-            {practiceSet.title}
-          </motion.p>
-
-          <motion.p
             className="mt-2 text-lg font-semibold text-gray-500"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -380,14 +437,17 @@ function PracticeRunner({
             {message.text}
           </motion.p>
 
-          {/* Score */}
+          {/* Score display */}
           <motion.div
             className="mt-6 flex items-center justify-center gap-2"
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.6 }}
           >
-            <span className="text-5xl font-extrabold text-orange-500">
+            <span
+              className="text-5xl font-extrabold"
+              style={{ color: unitColor }}
+            >
               {score}
             </span>
             <span className="text-2xl font-bold text-gray-400">
@@ -424,7 +484,7 @@ function PracticeRunner({
             ))}
           </motion.div>
 
-          {/* Progress bar */}
+          {/* Progress bar showing score */}
           <motion.div
             className="mx-auto mt-6 h-3 w-48 overflow-hidden rounded-full bg-gray-100"
             initial={{ opacity: 0 }}
@@ -432,7 +492,8 @@ function PracticeRunner({
             transition={{ delay: 1.2 }}
           >
             <motion.div
-              className="h-full rounded-full bg-orange-500"
+              className="h-full rounded-full"
+              style={{ backgroundColor: unitColor }}
               initial={{ width: 0 }}
               animate={{ width: `${(score / totalExercises) * 100}%` }}
               transition={{ delay: 1.3, duration: 0.8, ease: "easeOut" }}
@@ -448,12 +509,13 @@ function PracticeRunner({
           >
             <button
               onClick={handleRetry}
-              className="min-h-14 rounded-2xl bg-orange-500 px-8 text-lg font-bold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
+              className="min-h-14 rounded-2xl px-8 text-lg font-bold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
+              style={{ backgroundColor: unitColor }}
             >
               🔄 再做一次
             </button>
             <Link
-              href="/upload"
+              href={`/level/${id}/unit/${unitId}`}
               className="flex min-h-14 items-center justify-center rounded-2xl bg-gray-100 px-8 text-lg font-bold text-gray-600 shadow-md transition-all hover:scale-105 hover:bg-gray-200 active:scale-95"
             >
               ← 返回
@@ -475,97 +537,36 @@ function PracticeRunner({
       <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-5 py-3">
           <Link
-            href="/upload"
+            href={`/level/${id}/unit/${unitId}`}
             className="flex items-center gap-1.5 rounded-full bg-gray-100 px-3.5 py-2 text-sm font-bold text-gray-600 transition hover:bg-gray-200 active:scale-95"
           >
             <span className="text-lg leading-none">←</span>
             <span className="hidden sm:inline">返回</span>
           </Link>
 
-          <h2
-            className="max-w-[40%] truncate text-base font-extrabold text-gray-700"
-            title={practiceSet.title}
-          >
-            {practiceSet.title}
+          <h2 className="text-base font-extrabold text-gray-700">
+            Unit {unit.unitNumber} · 练习
           </h2>
 
-          <div className="flex items-center gap-2">
-            {hasOriginal && (
-              <button
-                onClick={() => setShowOriginal((v) => !v)}
-                className={`rounded-full px-3 py-1.5 text-xs font-bold transition active:scale-95 ${
-                  showOriginal
-                    ? "bg-orange-500 text-white"
-                    : "bg-orange-100 text-orange-600 hover:bg-orange-200"
-                }`}
-              >
-                📋 原题
-              </button>
-            )}
-            <span className="rounded-full bg-orange-500 px-3.5 py-1.5 text-sm font-extrabold text-white">
-              {currentIndex + 1}/{totalExercises}
-            </span>
-          </div>
+          <span
+            className="rounded-full px-3.5 py-1.5 text-sm font-extrabold text-white"
+            style={{ backgroundColor: unitColor }}
+          >
+            {currentIndex + 1}/{totalExercises}
+          </span>
         </div>
 
         {/* Progress bar */}
         <div className="h-1.5 w-full bg-gray-100">
           <motion.div
-            className="h-full rounded-r-full bg-orange-500"
+            className="h-full rounded-r-full"
+            style={{ backgroundColor: unitColor }}
             initial={{ width: 0 }}
             animate={{ width: `${progressPercent}%` }}
             transition={{ duration: 0.4, ease: "easeOut" }}
           />
         </div>
       </div>
-
-      {/* ===== Original Content Panel ===== */}
-      <AnimatePresence>
-        {showOriginal && hasOriginal && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden border-b-2 border-orange-100 bg-orange-50/60"
-          >
-            <div className="mx-auto max-w-2xl px-5 py-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="flex items-center gap-2 text-sm font-extrabold text-orange-700">
-                  📋 原题内容
-                  <span className="text-xs font-medium text-orange-400">
-                    ({practiceSet.fileName})
-                  </span>
-                </h3>
-                <button
-                  onClick={() => setShowOriginal(false)}
-                  className="rounded-full bg-orange-200/60 px-2.5 py-1 text-xs font-bold text-orange-600 transition hover:bg-orange-200 active:scale-95"
-                >
-                  收起
-                </button>
-              </div>
-
-              {practiceSet.originalImage && (
-                <div className="flex justify-center rounded-xl bg-white p-3 shadow-sm">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={practiceSet.originalImage}
-                    alt="原题"
-                    className="max-h-[400px] rounded-lg object-contain"
-                  />
-                </div>
-              )}
-
-              {practiceSet.originalText && (
-                <div className="max-h-[300px] overflow-y-auto rounded-xl bg-white p-4 shadow-sm">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
-                    {practiceSet.originalText}
-                  </p>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* ===== Exercise Area ===== */}
       <div className="relative mx-auto w-full max-w-2xl flex-1 px-5 py-6">
@@ -578,7 +579,7 @@ function PracticeRunner({
         >
           <span
             className="rounded-full px-3 py-1 text-xs font-bold text-white"
-            style={{ backgroundColor: exerciseColor }}
+            style={{ backgroundColor: currentExercise.accentColor }}
           >
             {currentExercise.type === "multiple-choice"
               ? "选择题"
@@ -603,31 +604,30 @@ function PracticeRunner({
             exit="exit"
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
           >
+            {/* Render current exercise */}
             {currentExercise.type === "multiple-choice" && (
               <MultipleChoiceUI
-                exercise={currentExercise as GeneratedMultipleChoice}
+                exercise={currentExercise}
                 selected={selectedAnswer}
                 onSelect={setSelectedAnswer}
                 showResult={showResult}
                 isCorrect={isCorrect}
-                accentColor={exerciseColor}
               />
             )}
             {currentExercise.type === "fill-blank" && (
               <FillBlankUI
-                exercise={currentExercise as GeneratedFillBlank}
+                exercise={currentExercise}
                 input={fillBlankInput}
                 onInputChange={setFillBlankInput}
                 showResult={showResult}
                 isCorrect={isCorrect}
                 showHint={showHint}
                 onToggleHint={() => setShowHint((h) => !h)}
-                accentColor={exerciseColor}
               />
             )}
             {currentExercise.type === "true-false" && (
               <TrueFalseUI
-                exercise={currentExercise as GeneratedTrueFalse}
+                exercise={currentExercise}
                 selected={trueFalseAnswer}
                 onSelect={setTrueFalseAnswer}
                 showResult={showResult}
@@ -636,14 +636,13 @@ function PracticeRunner({
             )}
             {currentExercise.type === "word-order" && (
               <WordOrderUI
-                exercise={currentExercise as GeneratedWordOrder}
+                exercise={currentExercise}
                 selectedWords={wordOrderSelected}
                 remainingWords={wordOrderRemaining}
                 onWordSelect={handleWordSelect}
                 onWordDeselect={handleWordDeselect}
                 showResult={showResult}
                 isCorrect={isCorrect}
-                accentColor={exerciseColor}
               />
             )}
           </motion.div>
@@ -685,28 +684,22 @@ function PracticeRunner({
                 </p>
                 {!isCorrect && currentExercise.type === "true-false" && (
                   <p className="mt-1 text-sm font-bold text-green-600">
-                    正确的句子：
-                    {(currentExercise as GeneratedTrueFalse).correctedSentence}
+                    正确的句子：{currentExercise.correctedSentence}
                   </p>
                 )}
                 {!isCorrect && currentExercise.type === "word-order" && (
                   <p className="mt-1 text-sm font-bold text-green-600">
-                    正确顺序：
-                    {(currentExercise as GeneratedWordOrder).correctOrder.join(
-                      " "
-                    )}
+                    正确顺序：{currentExercise.correctOrder.join(" ")}
                   </p>
                 )}
                 {!isCorrect && currentExercise.type === "multiple-choice" && (
                   <p className="mt-1 text-sm font-bold text-green-600">
-                    正确答案：
-                    {(currentExercise as GeneratedMultipleChoice).correct}
+                    正确答案：{currentExercise.correct}
                   </p>
                 )}
                 {!isCorrect && currentExercise.type === "fill-blank" && (
                   <p className="mt-1 text-sm font-bold text-green-600">
-                    正确答案：
-                    {(currentExercise as GeneratedFillBlank).answer}
+                    正确答案：{currentExercise.answer}
                   </p>
                 )}
               </div>
@@ -726,7 +719,9 @@ function PracticeRunner({
               disabled={!hasAnswer()}
               className="min-h-14 w-full max-w-sm rounded-2xl text-lg font-extrabold text-white shadow-lg transition-all disabled:cursor-not-allowed disabled:opacity-40"
               style={{
-                backgroundColor: hasAnswer() ? exerciseColor : "#CBD5E0",
+                backgroundColor: hasAnswer()
+                  ? currentExercise.accentColor
+                  : "#CBD5E0",
               }}
             >
               确认
@@ -738,7 +733,8 @@ function PracticeRunner({
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               onClick={handleNext}
-              className="min-h-14 w-full max-w-sm rounded-2xl bg-orange-500 text-lg font-extrabold text-white shadow-lg"
+              className="min-h-14 w-full max-w-sm rounded-2xl text-lg font-extrabold text-white shadow-lg"
+              style={{ backgroundColor: unitColor }}
             >
               下一题 →
             </motion.button>
@@ -772,17 +768,16 @@ function MultipleChoiceUI({
   onSelect,
   showResult,
   isCorrect,
-  accentColor,
 }: {
-  exercise: GeneratedMultipleChoice;
+  exercise: MultipleChoiceExercise;
   selected: string | null;
   onSelect: (v: string) => void;
   showResult: boolean;
   isCorrect: boolean;
-  accentColor: string;
 }) {
   return (
     <div>
+      {/* Question */}
       <div className="rounded-2xl bg-white p-6 shadow-md">
         <p className="text-center text-2xl font-extrabold leading-relaxed text-gray-800">
           {exercise.question.split("___").map((part, i, arr) => (
@@ -792,14 +787,16 @@ function MultipleChoiceUI({
                 <span
                   className="mx-1 inline-block min-w-16 border-b-4 px-2"
                   style={{
-                    borderColor: selected ? accentColor : "#CBD5E0",
+                    borderColor: selected
+                      ? exercise.accentColor
+                      : "#CBD5E0",
                   }}
                 >
                   {selected && (
                     <motion.span
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
-                      style={{ color: accentColor }}
+                      style={{ color: exercise.accentColor }}
                     >
                       {selected}
                     </motion.span>
@@ -811,6 +808,7 @@ function MultipleChoiceUI({
         </p>
       </div>
 
+      {/* Options 2x2 grid */}
       <div className="mt-6 grid grid-cols-2 gap-3">
         {exercise.options.map((option) => {
           const isSelected = selected === option;
@@ -850,13 +848,15 @@ function MultipleChoiceUI({
               style={
                 isSelected && !showResult
                   ? {
-                      borderColor: accentColor,
-                      backgroundColor: `${accentColor}10`,
+                      borderColor: exercise.accentColor,
+                      backgroundColor: `${exercise.accentColor}10`,
                     }
                   : {}
               }
             >
               <span className="relative z-10">{option}</span>
+
+              {/* Correct check icon */}
               {showResult && isCorrectAnswer && (
                 <motion.span
                   variants={bounceIn}
@@ -867,6 +867,8 @@ function MultipleChoiceUI({
                   ✓
                 </motion.span>
               )}
+
+              {/* Wrong X icon */}
               {showResult && isSelected && !isCorrect && !isCorrectAnswer && (
                 <motion.span
                   variants={bounceIn}
@@ -882,6 +884,7 @@ function MultipleChoiceUI({
         })}
       </div>
 
+      {/* Confetti on correct */}
       <AnimatePresence>
         {showResult && isCorrect && (
           <motion.div
@@ -902,7 +905,11 @@ function MultipleChoiceUI({
                   scale: [0, 1.2, 0.8],
                   rotate: [0, i % 2 === 0 ? 30 : -30],
                 }}
-                transition={{ duration: 1, delay: i * 0.1, ease: "easeOut" }}
+                transition={{
+                  duration: 1,
+                  delay: i * 0.1,
+                  ease: "easeOut",
+                }}
               >
                 {emoji}
               </motion.span>
@@ -924,16 +931,14 @@ function FillBlankUI({
   isCorrect,
   showHint,
   onToggleHint,
-  accentColor,
 }: {
-  exercise: GeneratedFillBlank;
+  exercise: FillBlankExercise;
   input: string;
   onInputChange: (v: string) => void;
   showResult: boolean;
   isCorrect: boolean;
   showHint: boolean;
   onToggleHint: () => void;
-  accentColor: string;
 }) {
   const inputBorderColor = showResult
     ? isCorrect
@@ -943,6 +948,7 @@ function FillBlankUI({
 
   return (
     <div>
+      {/* Sentence with inline input */}
       <div className="rounded-2xl bg-white p-6 shadow-md">
         <div className="flex flex-wrap items-baseline justify-center gap-1 text-2xl font-extrabold leading-relaxed text-gray-800">
           <span>{exercise.sentenceBefore}</span>
@@ -961,7 +967,7 @@ function FillBlankUI({
                   ? isCorrect
                     ? "#38A169"
                     : "#E53E3E"
-                  : accentColor,
+                  : exercise.accentColor,
               }}
               autoFocus
             />
@@ -984,6 +990,7 @@ function FillBlankUI({
         </div>
       </div>
 
+      {/* Hint button */}
       {!showResult && (
         <motion.div
           className="mt-4 flex justify-center"
@@ -1027,7 +1034,7 @@ function TrueFalseUI({
   showResult,
   isCorrect,
 }: {
-  exercise: GeneratedTrueFalse;
+  exercise: TrueFalseExercise;
   selected: boolean | null;
   onSelect: (v: boolean) => void;
   showResult: boolean;
@@ -1035,23 +1042,30 @@ function TrueFalseUI({
 }) {
   return (
     <div>
+      {/* Question prompt */}
       <p className="mb-3 text-center text-base font-bold text-gray-500">
         {exercise.question}
       </p>
 
+      {/* Sentence card */}
       <motion.div
         className="rounded-2xl bg-white p-8 text-center shadow-md"
-        style={{ borderLeft: `4px solid #FF8E53` }}
+        style={{
+          borderLeft: `4px solid ${exercise.accentColor}`,
+        }}
       >
         <p className="text-2xl font-extrabold leading-relaxed text-gray-800">
           &ldquo;{exercise.sentence}&rdquo;
         </p>
       </motion.div>
 
+      {/* True / False buttons */}
       <div className="mt-6 grid grid-cols-2 gap-4">
+        {/* True button */}
         {(() => {
           const isSelectedTrue = selected === true;
           const isCorrectTrue = exercise.correct === true;
+
           let bg = "bg-green-50";
           let border = "border-2 border-green-200";
           let textColor = "text-green-600";
@@ -1097,9 +1111,11 @@ function TrueFalseUI({
           );
         })()}
 
+        {/* False button */}
         {(() => {
           const isSelectedFalse = selected === false;
           const isCorrectFalse = exercise.correct === false;
+
           let bg = "bg-red-50";
           let border = "border-2 border-red-200";
           let textColor = "text-red-500";
@@ -1146,6 +1162,7 @@ function TrueFalseUI({
         })()}
       </div>
 
+      {/* Show corrected sentence */}
       <AnimatePresence>
         {showResult && !exercise.correct && (
           <motion.div
@@ -1175,16 +1192,14 @@ function WordOrderUI({
   onWordDeselect,
   showResult,
   isCorrect,
-  accentColor,
 }: {
-  exercise: GeneratedWordOrder;
+  exercise: WordOrderExercise;
   selectedWords: string[];
   remainingWords: string[];
   onWordSelect: (word: string, index: number) => void;
   onWordDeselect: (word: string, index: number) => void;
   showResult: boolean;
   isCorrect: boolean;
-  accentColor: string;
 }) {
   const sentenceBorderColor = showResult
     ? isCorrect
@@ -1194,10 +1209,12 @@ function WordOrderUI({
 
   return (
     <div>
+      {/* Question */}
       <p className="mb-3 text-center text-base font-bold text-gray-500">
         {exercise.question}
       </p>
 
+      {/* Sentence area (where selected words appear) */}
       <LayoutGroup>
         <div
           className="min-h-20 rounded-2xl bg-white p-4 shadow-md transition-colors"
@@ -1225,13 +1242,14 @@ function WordOrderUI({
                   onClick={() => onWordDeselect(word, idx)}
                   disabled={showResult}
                   className="rounded-xl px-4 py-2.5 text-lg font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
-                  style={{ backgroundColor: accentColor }}
+                  style={{ backgroundColor: exercise.accentColor }}
                 >
                   {word}
                 </motion.button>
               ))}
             </AnimatePresence>
 
+            {/* Result indicator */}
             {showResult && (
               <motion.span
                 variants={bounceIn}
@@ -1245,6 +1263,7 @@ function WordOrderUI({
           </div>
         </div>
 
+        {/* Word bank (remaining words) */}
         <div className="mt-6">
           <p className="mb-2 text-center text-sm font-semibold text-gray-400">
             可用单词
@@ -1267,8 +1286,8 @@ function WordOrderUI({
                   disabled={showResult}
                   className="rounded-xl border-2 bg-white px-5 py-3 text-lg font-bold shadow-sm transition-all hover:scale-105 hover:shadow-md active:scale-95"
                   style={{
-                    borderColor: `${accentColor}60`,
-                    color: accentColor,
+                    borderColor: `${exercise.accentColor}60`,
+                    color: exercise.accentColor,
                   }}
                 >
                   {word}
@@ -1279,6 +1298,7 @@ function WordOrderUI({
         </div>
       </LayoutGroup>
 
+      {/* Show correct order on wrong answer */}
       <AnimatePresence>
         {showResult && !isCorrect && (
           <motion.div

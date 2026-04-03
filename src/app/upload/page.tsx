@@ -146,7 +146,7 @@ export default function UploadPage() {
       setPracticeSets(getPracticeSets());
 
       // Navigate to practice page
-      router.push(`/upload/practice/${result.id}`);
+      router.push(`/upload/practice?id=${result.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "生成失败，请重试");
     } finally {
@@ -447,7 +447,7 @@ export default function UploadPage() {
                   </div>
                   <div className="flex gap-2">
                     <Link
-                      href={`/upload/practice/${set.id}`}
+                      href={`/upload/practice?id=${set.id}`}
                       className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-orange-600 active:scale-95"
                     >
                       开始练习
